@@ -63,19 +63,29 @@ public:
 
 int lineIndex =1;
 int huntLevelCount =0;
+int finalSell=0;
+int finallBuy=0;
+
+//debug vars
+long longChecks=0;
+long partOne=0;
+long partTwo=0;
+long partThree=0;
+long partFour=0;
+long trueBuy=0;
+
+
 
 HuntLevel  _huntLevels[];
 CTrade trade;
 
 
 // generic inputs
-input bool Debug_Mode = false;
-
+input bool debug = false;
 // isGoodHuntCandle inputs
 input int      Minimum_Shadow_Points                  =  1;
 input double   Minimum_Shadow_Per_Body                =  1.5;
 input int      Minimum_Gap_Point                      =  5;
-input int      Minimum_Higher_Then_Last_n             =  10;
 input int      Minimum_Hunted_Swings_Check_End        =  50;
 input int      Minimum_Hunted_Swings_Check_Start      =  5;
 input int      Minimum_HuntLevel_To_Pull_Back_Candles =  50;
@@ -89,7 +99,6 @@ input int      Minimum_SL_from_hunt_shadow            =  10;
 //+------------------------------------------------------------------+
 int OnInit() {
 //---
-
 //---
    return(INIT_SUCCEEDED);
 }
@@ -99,9 +108,16 @@ int OnInit() {
 void OnDeinit(const int reason) {
 //---
 
-   Print("Hunt Level Counts: "+huntLevelCount);
-
-
+   PrintFormat("Hunt Level Counts: %d "+huntLevelCount);
+   PrintFormat("Final Sell Positions: %d",finalSell);
+   PrintFormat("Final Buy Positions: %d",finallBuy);
+   Print("But positions:");
+   PrintFormat("All %d",longChecks);
+   PrintFormat("One %d",partOne);
+   PrintFormat("Two %d",partTwo);
+   PrintFormat("Three %d",partThree);
+   PrintFormat("Four %d",partFour);
+   PrintFormat("True Buy %d",trueBuy);
 }
 //+------------------------------------------------------------------+
 //| Expert tick function                                             |
@@ -109,9 +125,8 @@ void OnDeinit(const int reason) {
 void OnTick() {
 //---
    if(isNewBar()) {
-      //DebugBreak();
       increaseHuntCandleIndexes();
-    
+
       int checkingIndex=1;
 
       openPosition();
@@ -146,26 +161,64 @@ void findAndSaveHuntLevel(int checkingIndex) {
 //|                                                                  |
 //+------------------------------------------------------------------+
 double getTPSell(int huntCandleIndex) {
-//return SymbolInfoDouble(_Symbol, SYMBOL_BID) - tp_points *_Point;
-   double diff = NormalizeDouble(MathAbs(getSLSell(huntCandleIndex) - SymbolInfoDouble(_Symbol,SYMBOL_BID)),_Digits);
-   return SymbolInfoDouble(_Symbol, SYMBOL_BID) - NormalizeDouble((diff*TP_per_SL),_Digits);
+createVLine(clrRed,huntCandleIndex,STYLE_DASH);
+   int tmp=huntCandleIndex, base =-1;
+   do {
+      tmp = getTrendMakerSwingIndex(tmp,SELL_POS);
+      if(getLow(tmp)<SymbolInfoDouble(_Symbol,SYMBOL_BID)) {
+         base = tmp;
+      }
 
+   } while(base ==-1);
+   createHLine(clrViolet,getLow(base));
+   createVLine(clrViolet,base,STYLE_DASH);
+   return getLow(base);
+
+//double diff = NormalizeDouble(MathAbs(getSLSell(huntCandleIndex) - SymbolInfoDouble(_Symbol,SYMBOL_BID)),_Digits);
+//return NormalizeDouble(SymbolInfoDouble(_Symbol, SYMBOL_BID) - NormalizeDouble((diff*TP_per_SL),_Digits)+SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)*_Point,_Digits);
 }
 
-double getTPBuy(int huntCandleIndex){
-return getHigh(huntCandleIndex)+50*_Point;
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double getTPBuy(int huntCandleIndex) {
+   createVLine(clrBlue,huntCandleIndex,STYLE_DASH);
+   int tmp=huntCandleIndex, base =-1;
+   do {
+      tmp = getTrendMakerSwingIndex(tmp,BUY_POS);
+      if(getHigh(tmp)>SymbolInfoDouble(_Symbol,SYMBOL_ASK)) {
+         base = tmp;
+      }
+
+   } while(base ==-1);
+
+   createHLine(clrYellow,getHigh(base));
+   createVLine(clrYellow,base,STYLE_DASH);
+
+
+   return getHigh(base);
+
+
+//double diff = NormalizeDouble(MathAbs(getSLBuy(huntCandleIndex) - SymbolInfoDouble(_Symbol,SYMBOL_ASK)),_Digits);
+//return NormalizeDouble(SymbolInfoDouble(_Symbol, SYMBOL_ASK) + NormalizeDouble((diff*TP_per_SL),_Digits)-SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)*_Point,_Digits);
 }
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
 double getSLSell(int huntCandleIndex) {
    double candleHigh = getHigh(huntCandleIndex);
-   return candleHigh + 100 * _Point;
+   double ask = SymbolInfoDouble(_Symbol,SYMBOL_ASK);
+   return NormalizeDouble(MathMax(candleHigh,ask)+50 *_Point,_Digits);
 }
 
-double getSLBuy(int huntCandleIndex){
-return getLow(huntCandleIndex) - 40*_Point;
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double getSLBuy(int huntCandleIndex) {
 
+   double low = getLow(huntCandleIndex);
+   double bid = SymbolInfoDouble(_Symbol,SYMBOL_BID);
+   return NormalizeDouble(MathMin(low,bid),_Digits);
 }
 //+------------------------------------------------------------------+
 //|                                                                  |
@@ -175,12 +228,26 @@ void openPosition() {
    for(int i=0; i<total; i++) {
       if(_huntLevels[i].pullBackOut) {
          if(_huntLevels[i].position==SELL_POS) {
-            trade.Sell(0.01,Symbol(),0,getSLSell(_huntLevels[i].huntCandleIndex),getTPSell(_huntLevels[i].huntCandleIndex));
+            bool successTrade =trade.Sell(0.1,Symbol(),0,getSLSell(_huntLevels[i].huntCandleIndex),getTPSell(_huntLevels[i].huntCandleIndex));
             _huntLevels[i].valid=false;
+            finalSell++;
+//            if(!successTrade) {
+//               int code = trade.ResultRetcode();
+//               if(code == TRADE_RETCODE_INVALID_STOPS) {
+//                  successTrade = trade.Sell(0.1,Symbol(),0,getSLSell(_huntLevels[i].huntCandleIndex)+10*_Point,getTPSell(_huntLevels[i].huntCandleIndex));;
+//                  if(successTrade) {
+//                     finalSell++;
+//                  }
+//
+//               }
+//            } else {
+//               finalSell++;
+//            }
          } else if(_huntLevels[i].position==BUY_POS) {
-            DebugBreak();
-            trade.Buy(0.01,Symbol(),0,getSLBuy(_huntLevels[i].huntCandleIndex),getTPBuy(_huntLevels[i].huntCandleIndex));
+            bool successTrade = trade.Buy(0.1,Symbol(),0,getSLBuy(_huntLevels[i].huntCandleIndex),getTPBuy(_huntLevels[i].huntCandleIndex));
+            finallBuy++;
             _huntLevels[i].valid=false;
+
          }
       }
    }
@@ -223,9 +290,9 @@ void checkPricePullBackIn() {
             }
          } else if(_huntLevels[i].position==BUY_POS) {
             if(
-               getLow(1)<MathMin(getOpen(_huntLevels[i].huntCandleIndex),getClose(_huntLevels[i].huntCandleIndex))
+               getClose(1)<MathMin(getOpen(_huntLevels[i].huntCandleIndex),getClose(_huntLevels[i].huntCandleIndex))
                &&
-               getLow(1)>getLow(_huntLevels[i].huntCandleIndex)
+               getClose(1)>getLow(_huntLevels[i].huntCandleIndex)
             ) {
                _huntLevels[i].pullBackIn=true;
             }
@@ -241,13 +308,17 @@ void checkPricePullBackIn() {
 void checkHuntLevelPriceCrossing() {
    int total = _huntLevels.Size();
    for(int i=0; i<total; i++) {
-      _huntLevels[i].print();
+
       if(_huntLevels[i].position==SELL_POS) {
          if(getHigh(0)>getHigh(_huntLevels[i].huntCandleIndex)) {
+            if(debug)
+               PrintFormat("HuntLevel index %d Invalidate based On Price Crossing.",_huntLevels[i].huntCandleIndex);
             _huntLevels[i].valid= false;
          }
       } else {
-         if(getLow(0)>getLow(_huntLevels[i].huntCandleIndex)) {
+         if(getLow(0)<getLow(_huntLevels[i].huntCandleIndex)) {
+            if(debug)
+               PrintFormat("HuntLevel index %d Invalidate based On Price Crossing.",_huntLevels[i].huntCandleIndex);
             _huntLevels[i].valid= false;
          }
       }
@@ -261,20 +332,25 @@ void checkHuntLevelPriceCrossing() {
 //+------------------------------------------------------------------+
 void checkPriceFirstExit() {
    int total = _huntLevels.Size();
-   PrintFormat("Checking NextCandle Of HuntLevels(count: %d) For First Exit PriceOut",total);
    for(int i=0; i<total; i++) {
-      _huntLevels[i].print();
       if(_huntLevels[i].huntCandleIndex>1 && !_huntLevels[i].firstExit) {
          if(_huntLevels[i].position==SELL_POS) {
             if(getClose(1)<getOpen(1) && getClose(_huntLevels[i].huntCandleIndex)>getClose(1) && getOpen(1)<MathMax(getClose(_huntLevels[i].huntCandleIndex),getOpen(_huntLevels[i].huntCandleIndex)) && getBody(1)>getBody(_huntLevels[i].huntCandleIndex)) {
                _huntLevels[i].firstExit=true;
             } else {
+               if(debug)
+                  PrintFormat("HuntLevel index %d Invalidate based On first price Exit.",_huntLevels[i].huntCandleIndex);
                _huntLevels[i].valid= false;
             }
          } else if(_huntLevels[i].position==BUY_POS) {
-            if(getClose(1)>getOpen(1) && getClose(_huntLevels[i].huntCandleIndex)<getClose(1) && getOpen(1)>MathMin(getClose(_huntLevels[i].huntCandleIndex),getOpen(_huntLevels[i].huntCandleIndex)) && getBody(1)>getBody(_huntLevels[i].huntCandleIndex)) {
+            if(getClose(1)>getOpen(1)
+                  && getClose(_huntLevels[i].huntCandleIndex)<getClose(1)
+                  && getOpen(1)>MathMin(getClose(_huntLevels[i].huntCandleIndex),getOpen(_huntLevels[i].huntCandleIndex)) &&
+                  getBody(1)>getBody(_huntLevels[i].huntCandleIndex)) {
                _huntLevels[i].firstExit=true;
             } else {
+               if(debug)
+                  PrintFormat("HuntLevel index %d Invalidate based On first price Exit.",_huntLevels[i].huntCandleIndex);
                _huntLevels[i].valid= false;
             }
 
@@ -289,7 +365,6 @@ void checkPriceFirstExit() {
 //+------------------------------------------------------------------+
 void increaseHuntCandleIndexes() {
    int total = _huntLevels.Size();
-
    for(int i=0; i<total; i++) {
       if(!_huntLevels[i].valid || _huntLevels[i].huntCandleIndex > Minimum_HuntLevel_To_Pull_Back_Candles) {
          ObjectDelete(ChartID(),_huntLevels[i].lineName);
@@ -320,6 +395,30 @@ void saveHuntLevel(int huntLevelIndex,int position,string lname) {
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+int getTrendMakerSwingIndex(int start,int position) {
+   int previous,current=start;
+   double avgPrevious,avgCurrent;
+   do {
+      current++;
+      previous = current+1;
+      avgPrevious = getAveragePrice(previous);
+      avgCurrent = getAveragePrice(current);
+
+      if(position==BUY_POS && avgPrevious< avgCurrent) {
+         return current;
+      } else  if(position==SELL_POS && avgPrevious>avgCurrent) {
+         return current;
+
+      }
+
+   } while(true);
+}
+
+
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 int getSwingsCount(double fromPrice, double untilPrice,int backCheckCount,int indexFrom,int swingType) {
    int res =0;
    double p =0.0;
@@ -338,10 +437,6 @@ int getSwingsCount(double fromPrice, double untilPrice,int backCheckCount,int in
 
 //+------------------------------------------------------------------+
 //|  this Method used for recognizing swings and Swing types                                                               |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//|                                                                  |
 //+------------------------------------------------------------------+
 int getSwingType(int index) {
 
@@ -367,17 +462,14 @@ bool isGoodHuntCandle(int index,int position) {
       double upShadow = getUpShadow(index);
       double downShadow = getDownShadow(index);
       if(downShadow > upShadow) {
-         printDebug("Down Shadow bigger then up Shadow and it's bad condition");
          return false;
       }
       double minUpShadow = NormalizeDouble(Minimum_Shadow_Points * _Point,_Digits);
       if(upShadow<minUpShadow) {
-         printDebug("minUpShadow Value: "+minUpShadow +" up shadow : "+ getUpShadow(index)+" and it's bad condition");
          return false;
       }
       double shadowPerBody = getUpShadow(index) / MathMax(getBody(index),(1*_Point));
       if(shadowPerBody<Minimum_Shadow_Per_Body) {
-         printDebug("shadowPerBody Value: "+shadowPerBody +" Minimum_Shadow_Per_Body : "+ Minimum_Shadow_Per_Body+" and it's bad condition");
          return false;
       }
       double upBand = getHigh(index);
@@ -385,10 +477,8 @@ bool isGoodHuntCandle(int index,int position) {
       int r =0;
       for(int i=index+Minimum_Hunted_Swings_Check_Start; i<Minimum_Hunted_Swings_Check_End+index+1; i++) {
          if(getHigh(i)<=upBand && getHigh(i)>= lowBand) {
-            PrintFormat("Candle %s is inside Band:",IntegerToString(i));
             int hSwing = iHighest(_Symbol,PERIOD_CURRENT,MODE_HIGH,i-index+1,index);
             if(hSwing==index) {
-               PrintFormat("From %s until %s Highies is %s",IntegerToString(index),IntegerToString(i),IntegerToString(hSwing));
                int sType = getSwingType(i);
                if(sType == To_Low) {
                   r++;
@@ -398,58 +488,59 @@ bool isGoodHuntCandle(int index,int position) {
       }
 
       if(r<1) {
-         printDebug("No Hunted Swing found. bad condition.");
          return false;
       }
-
+      if(debug)
+         Print("New HuntLevelFound");
       return true;
    } else if(position==BUY_POS) {
+
+      longChecks++;
       double upShadow = getUpShadow(index);
       double downShadow = getDownShadow(index);
 
       if(upShadow > downShadow) {
-         printDebug("Up Shadow bigger then Down Shadow and it's bad condition");
+         partOne++;
          return false;
       }
 
       double minDownShadow = NormalizeDouble(Minimum_Shadow_Points * _Point,_Digits);
 
       if(downShadow<minDownShadow) {
-         printDebug("mindownShadow Value: "+minDownShadow +" down shadow : "+ downShadow+" and it's bad condition");
+         partTwo++;
          return false;
       }
 
       double shadowPerBody = NormalizeDouble(downShadow / MathMax(getBody(index),(1*_Point)),_Digits);
       if(shadowPerBody<Minimum_Shadow_Per_Body) {
-         printDebug("shadowPerBody Value: "+shadowPerBody +" Minimum_Shadow_Per_Body : "+ Minimum_Shadow_Per_Body+" and it's bad condition");
+         partThree++;
          return false;
       }
 
-      double upBand =NormalizeDouble(MathMin(MathMin(getOpen(index),getClose(index)),MathMin(getOpen(index+1),getClose(index+1))),_Digits);
+      double upBand =NormalizeDouble(MathMax(MathMax(getOpen(index),getClose(index)),MathMax(getOpen(index+1),getClose(index+1))),_Digits);
       double lowBand =  getLow(index);
       int r =0;
       for(int i=index+Minimum_Hunted_Swings_Check_Start; i<Minimum_Hunted_Swings_Check_End+index+1; i++) {
 
          if(getLow(i)>=lowBand && getLow(i)<= upBand) {
-            PrintFormat("Candle %s is inside Band:",IntegerToString(i));
             int hSwing = iLowest(_Symbol,PERIOD_CURRENT,MODE_LOW,i-index+1,index);
             if(hSwing==index) {
-               PrintFormat("From %s until %s Highies is %s",IntegerToString(index),IntegerToString(i),IntegerToString(hSwing));
                int sType = getSwingType(i);
                if(sType == To_High) {
                   r++;
                }
-
             }
-
          }
       }
 
       if(r<1) {
-         printDebug("No Hunted Swing found. bad condition.");
+         partFour++;
          return false;
       }
-      DebugBreak();
+      trueBuy++;
+      if(debug)//---
+
+         Print("New HuntLevelFound");
       return true;
    } else {
       return false;
@@ -578,18 +669,7 @@ void createHLine(int colorInteger,double price) {
    ObjectSetInteger(chartId,name,OBJPROP_BACK,true);
 }
 //+------------------------------------------------------------------+
-
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-void printDebug(string s) {
-   if(Debug_Mode) {
-      Print(s);
-   }
+void printCandle(int index) {
+   PrintFormat("index: %d, High: %f, Open: %f, Close: %f, Low: %f",index,getHigh(index),getOpen(index),getClose(index),getLow(index));
 }
-//+------------------------------------------------------------------+
-
-
-
 //+------------------------------------------------------------------+
