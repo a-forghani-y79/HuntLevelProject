@@ -74,6 +74,10 @@ long partThree=0;
 long partFour=0;
 long trueBuy=0;
 
+// indicator handlers
+
+int ma=-1;
+
 
 
 HuntLevel  _huntLevels[];
@@ -91,6 +95,7 @@ input int      Minimum_Hunted_Swings_Check_Start      =  5;
 input int      Minimum_HuntLevel_To_Pull_Back_Candles =  50;
 input double   TP_per_SL                              =  0.5;
 input int      Minimum_SL_from_hunt_shadow            =  10;
+input int      EMA_PERIOD                             =   7;
 
 
 
@@ -100,6 +105,8 @@ input int      Minimum_SL_from_hunt_shadow            =  10;
 int OnInit() {
 //---
 //---
+   ma = iMA(_Symbol,PERIOD_CURRENT,EMA_PERIOD,0,MODE_EMA,PRICE_WEIGHTED);
+  
    return(INIT_SUCCEEDED);
 }
 //+------------------------------------------------------------------+
@@ -161,7 +168,7 @@ void findAndSaveHuntLevel(int checkingIndex) {
 //|                                                                  |
 //+------------------------------------------------------------------+
 double getTPSell(int huntCandleIndex) {
-createVLine(clrRed,huntCandleIndex,STYLE_DASH);
+   createVLine(clrRed,huntCandleIndex,STYLE_DASH);
    int tmp=huntCandleIndex, base =-1;
    do {
       tmp = getTrendMakerSwingIndex(tmp,SELL_POS);
@@ -218,7 +225,7 @@ double getSLBuy(int huntCandleIndex) {
 
    double low = getLow(huntCandleIndex);
    double bid = SymbolInfoDouble(_Symbol,SYMBOL_BID);
-   return NormalizeDouble(MathMin(low,bid),_Digits);
+   return NormalizeDouble(MathMin(low,bid)-50*_Point,_Digits);
 }
 //+------------------------------------------------------------------+
 //|                                                                  |
@@ -397,21 +404,43 @@ void saveHuntLevel(int huntLevelIndex,int position,string lname) {
 //+------------------------------------------------------------------+
 int getTrendMakerSwingIndex(int start,int position) {
    int previous,current=start;
-   double avgPrevious,avgCurrent;
    do {
       current++;
       previous = current+1;
-      avgPrevious = getAveragePrice(previous);
-      avgCurrent = getAveragePrice(current);
 
-      if(position==BUY_POS && avgPrevious< avgCurrent) {
-         return current;
-      } else  if(position==SELL_POS && avgPrevious>avgCurrent) {
-         return current;
-
+      if(position==BUY_POS) {
+         if(
+            //getEMA_Weighted(current,3)>getEMA_Weighted(previous,3) &&
+            //      getEMA_Weighted(current,5)>getEMA_Weighted(previous,5) &&
+            getEMA_Weighted(current,7)>getEMA_Weighted(previous,7)
+         ) {
+            break;
+         }
+      } else  if(position==SELL_POS) {
+         if(
+            //getEMA_Weighted(current,3)>getEMA_Weighted(previous,3) &&
+            //      getEMA_Weighted(current,5)>getEMA_Weighted(previous,5) &&
+            getEMA_Weighted(current,7)<getEMA_Weighted(previous,7)
+         ) {
+            break;
+         }
       }
 
    } while(true);
+
+   return current;
+}
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double getEMA_Weighted(int index,int ma_period) {
+   double data[];
+   ArraySetAsSeries(data, true);
+   CopyBuffer(ma, 0, index, index+1, data);
+   double ema_value=data[0];
+   PrintFormat("EMA period: %d for index %d is: %s",ma_period,index,DoubleToString(ema_value,_Digits));
+   return ema_value;
 }
 
 
