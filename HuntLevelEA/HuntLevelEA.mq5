@@ -93,9 +93,8 @@ input int      Minimum_Gap_Point                      =  5;
 input int      Minimum_Hunted_Swings_Check_End        =  50;
 input int      Minimum_Hunted_Swings_Check_Start      =  5;
 input int      Minimum_HuntLevel_To_Pull_Back_Candles =  50;
-input double   TP_per_SL                              =  0.5;
-input int      Minimum_SL_from_hunt_shadow            =  10;
 input int      EMA_PERIOD                             =   7;
+input double   Risk_Percent                           =  5;
 
 
 
@@ -106,7 +105,7 @@ int OnInit() {
 //---
 //---
    ma = iMA(_Symbol,PERIOD_CURRENT,EMA_PERIOD,0,MODE_EMA,PRICE_WEIGHTED);
-  
+
    return(INIT_SUCCEEDED);
 }
 //+------------------------------------------------------------------+
@@ -169,7 +168,7 @@ void findAndSaveHuntLevel(int checkingIndex) {
 //+------------------------------------------------------------------+
 double getTPSell(int huntCandleIndex) {
    createVLine(clrRed,huntCandleIndex,STYLE_DASH);
-   int tmp=huntCandleIndex, base =-1;
+   int tmp=huntCandleIndex+Minimum_Hunted_Swings_Check_Start, base =-1;
    do {
       tmp = getTrendMakerSwingIndex(tmp,SELL_POS);
       if(getLow(tmp)<SymbolInfoDouble(_Symbol,SYMBOL_BID)) {
@@ -180,9 +179,6 @@ double getTPSell(int huntCandleIndex) {
    createHLine(clrViolet,getLow(base));
    createVLine(clrViolet,base,STYLE_DASH);
    return getLow(base);
-
-//double diff = NormalizeDouble(MathAbs(getSLSell(huntCandleIndex) - SymbolInfoDouble(_Symbol,SYMBOL_BID)),_Digits);
-//return NormalizeDouble(SymbolInfoDouble(_Symbol, SYMBOL_BID) - NormalizeDouble((diff*TP_per_SL),_Digits)+SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)*_Point,_Digits);
 }
 
 //+------------------------------------------------------------------+
@@ -190,7 +186,7 @@ double getTPSell(int huntCandleIndex) {
 //+------------------------------------------------------------------+
 double getTPBuy(int huntCandleIndex) {
    createVLine(clrBlue,huntCandleIndex,STYLE_DASH);
-   int tmp=huntCandleIndex, base =-1;
+   int tmp=huntCandleIndex+Minimum_Hunted_Swings_Check_Start , base =-1;
    do {
       tmp = getTrendMakerSwingIndex(tmp,BUY_POS);
       if(getHigh(tmp)>SymbolInfoDouble(_Symbol,SYMBOL_ASK)) {
@@ -204,10 +200,6 @@ double getTPBuy(int huntCandleIndex) {
 
 
    return getHigh(base);
-
-
-//double diff = NormalizeDouble(MathAbs(getSLBuy(huntCandleIndex) - SymbolInfoDouble(_Symbol,SYMBOL_ASK)),_Digits);
-//return NormalizeDouble(SymbolInfoDouble(_Symbol, SYMBOL_ASK) + NormalizeDouble((diff*TP_per_SL),_Digits)-SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)*_Point,_Digits);
 }
 //+------------------------------------------------------------------+
 //|                                                                  |
@@ -230,28 +222,32 @@ double getSLBuy(int huntCandleIndex) {
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+double getVolume(double riskPercent,double stoploss,int POSITION_TYPE) {
+   double price = POSITION_TYPE==POSITION_TYPE_BUY?SymbolInfoDouble(_Symbol,SYMBOL_ASK):SymbolInfoDouble(_Symbol,SYMBOL_BID);
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   int leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
+   double volume = NormalizeDouble((riskPercent*balance) /(MathAbs(stoploss - price)*100*leverage),2);
+   return volume;
+}
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 void openPosition() {
    int total = _huntLevels.Size();
    for(int i=0; i<total; i++) {
       if(_huntLevels[i].pullBackOut) {
          if(_huntLevels[i].position==SELL_POS) {
-            bool successTrade =trade.Sell(0.1,Symbol(),0,getSLSell(_huntLevels[i].huntCandleIndex),getTPSell(_huntLevels[i].huntCandleIndex));
+            double slSell = getSLSell(_huntLevels[i].huntCandleIndex);
+            double volume = getVolume(Risk_Percent,slSell,POSITION_TYPE_SELL);
+            PrintFormat("volume: %s",DoubleToString(volume,2));
+            bool successTrade =trade.Sell(volume,Symbol(),0,slSell,getTPSell(_huntLevels[i].huntCandleIndex));
             _huntLevels[i].valid=false;
             finalSell++;
-//            if(!successTrade) {
-//               int code = trade.ResultRetcode();
-//               if(code == TRADE_RETCODE_INVALID_STOPS) {
-//                  successTrade = trade.Sell(0.1,Symbol(),0,getSLSell(_huntLevels[i].huntCandleIndex)+10*_Point,getTPSell(_huntLevels[i].huntCandleIndex));;
-//                  if(successTrade) {
-//                     finalSell++;
-//                  }
-//
-//               }
-//            } else {
-//               finalSell++;
-//            }
          } else if(_huntLevels[i].position==BUY_POS) {
-            bool successTrade = trade.Buy(0.1,Symbol(),0,getSLBuy(_huntLevels[i].huntCandleIndex),getTPBuy(_huntLevels[i].huntCandleIndex));
+            double slBuy = getSLBuy(_huntLevels[i].huntCandleIndex);
+            double volume = getVolume(Risk_Percent,slBuy,POSITION_TYPE_SELL);
+            PrintFormat("volume: %s",DoubleToString(volume,2));
+            bool successTrade = trade.Buy(volume,Symbol(),0,slBuy,getTPBuy(_huntLevels[i].huntCandleIndex));
             finallBuy++;
             _huntLevels[i].valid=false;
 
@@ -269,11 +265,11 @@ void checkPricePullBackOut() {
    for(int i=0; i<total; i++) {
       if(_huntLevels[i].pullBackIn&&_huntLevels[i].huntCandleIndex>1) {
          if(_huntLevels[i].position==SELL_POS) {
-            if(getClose(1)<MathMax(getOpen(_huntLevels[i].huntCandleIndex),getClose(_huntLevels[i].huntCandleIndex))) {
+            if(getClose(0)<MathMax(getOpen(_huntLevels[i].huntCandleIndex),getClose(_huntLevels[i].huntCandleIndex))) {
                _huntLevels[i].pullBackOut=true;
             }
          } else if(_huntLevels[i].position==BUY_POS) {
-            if(getClose(1)>MathMin(getOpen(_huntLevels[i].huntCandleIndex),getClose(_huntLevels[i].huntCandleIndex))) {
+            if(getClose(0)>MathMin(getOpen(_huntLevels[i].huntCandleIndex),getClose(_huntLevels[i].huntCandleIndex))) {
                _huntLevels[i].pullBackOut=true;
             }
          }
@@ -410,17 +406,13 @@ int getTrendMakerSwingIndex(int start,int position) {
 
       if(position==BUY_POS) {
          if(
-            //getEMA_Weighted(current,3)>getEMA_Weighted(previous,3) &&
-            //      getEMA_Weighted(current,5)>getEMA_Weighted(previous,5) &&
-            getEMA_Weighted(current,7)>getEMA_Weighted(previous,7)
+            getEMA_Weighted(current)>getEMA_Weighted(previous)
          ) {
             break;
          }
       } else  if(position==SELL_POS) {
          if(
-            //getEMA_Weighted(current,3)>getEMA_Weighted(previous,3) &&
-            //      getEMA_Weighted(current,5)>getEMA_Weighted(previous,5) &&
-            getEMA_Weighted(current,7)<getEMA_Weighted(previous,7)
+            getEMA_Weighted(current)<getEMA_Weighted(previous)
          ) {
             break;
          }
@@ -434,13 +426,11 @@ int getTrendMakerSwingIndex(int start,int position) {
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-double getEMA_Weighted(int index,int ma_period) {
+double getEMA_Weighted(int index) {
    double data[];
    ArraySetAsSeries(data, true);
    CopyBuffer(ma, 0, index, index+1, data);
-   double ema_value=data[0];
-   PrintFormat("EMA period: %d for index %d is: %s",ma_period,index,DoubleToString(ema_value,_Digits));
-   return ema_value;
+   return data[0];
 }
 
 
